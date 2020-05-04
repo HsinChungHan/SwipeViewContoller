@@ -7,11 +7,16 @@
 
 import UIKit
 
-//MARK: - Instance
-fileprivate let barDeselectColor = UIColor.init(white: 0, alpha: 0.1)
-fileprivate let barSelectColor = UIColor.white
+//MARK: - SwipeViewControllerDataSource
+public protocol SwipeViewControllerDataSource: AnyObject {
+  func swipeViewControllerIsAutoScrolling(_ swipeViewController: SwipeViewController) -> Bool
+  func swipeViewControllerTimeIntervalOfAutoScrolling(_ swipeViewController: SwipeViewController) -> TimeInterval
+}
 
 public class SwipeViewController: UIViewController {
+  
+  //MARK: - Properties
+  weak public var dataSource: SwipeViewControllerDataSource?
   
   fileprivate lazy var pagingVC = makePagingVC()
   fileprivate lazy var barStackView = makeBarStackView()
@@ -19,6 +24,7 @@ public class SwipeViewController: UIViewController {
   fileprivate let viewControllers: [UIViewController]
   fileprivate let swipeViewControllerModel = SwipeViewControllerModel()
   
+  //MARK: - Initialize
   public init(viewControllers: [UIViewController]) {
     self.viewControllers = viewControllers
     super.init(nibName: nil, bundle: nil)
@@ -28,16 +34,20 @@ public class SwipeViewController: UIViewController {
     fatalError("init(coder:) has not been implemented")
   }
   
+  //MARK: - View Life Cycle
   override public func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = .white
     setupLayout()
     setViewControlersIntoPagingVC(allViewControllers: viewControllers, pagingVC: pagingVC)
     tapController.addTapGesture(in: view)
+    makeTimerManager()
   }
 }
 
+//MARK: - Private function and Lazy Initialization
 extension SwipeViewController {
+  
   fileprivate func makePagingVC() -> UIPageViewController {
     let vc = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal, options: nil)
     vc.delegate = self
@@ -52,12 +62,11 @@ extension SwipeViewController {
     stackView.distribution = .fillEqually
     for _ in 0 ... (viewControllers.count - 1) {
       let barView = UIView()
-      barView.backgroundColor = barDeselectColor
       barView.layer.cornerRadius = 2.0
       barView.clipsToBounds = true
       stackView.addArrangedSubview(barView)
     }
-    stackView.arrangedSubviews.first?.backgroundColor = barSelectColor
+    swipeViewControllerModel.setBarColor(barStackView: stackView, currentIndex: 0)
     return stackView
   }
   
@@ -84,16 +93,30 @@ extension SwipeViewController {
     pagingVC.setViewControllers([firstVC], direction: .forward, animated: false, completion: nil)
   }
   
-  fileprivate func setBarColor(_ index: Int) {
-    //讓目前呈現的 VC 對應的 barStackView 的 bar 更改顏色
-    barStackView.arrangedSubviews.forEach{
-      $0.backgroundColor = barDeselectColor
+  fileprivate func makeTimerManager() {
+    guard let dataSource = dataSource else {
+      fatalError("🚨 You have to set dataSource for SwipeViewController")
     }
-    barStackView.arrangedSubviews[index].backgroundColor = barSelectColor
+    
+    if dataSource.swipeViewControllerIsAutoScrolling(self) {
+      TimerManager.shred.dataSource = self
+      TimerManager.shred.delegate = self
+      TimerManager.shred.setupTimer()
+    }
   }
 }
 
+//MARK: - Public function
+extension SwipeViewController {
+  
+  public func invalidatTimer() {
+    TimerManager.shred.invalidateTimer()
+  }
+}
+
+//MARK: - UIPageViewControllerDataSource
 extension SwipeViewController: UIPageViewControllerDataSource {
+  
   public func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
     //得到前一個頁面
     guard let viewControllerIndex = viewControllers.firstIndex(of: viewController) else {
@@ -128,25 +151,39 @@ extension SwipeViewController: UIPageViewControllerDataSource {
   }
 }
 
+//MARK: - UIPageViewControllerDelegate
 extension SwipeViewController: UIPageViewControllerDelegate {
   
   public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+    TimerManager.shred.invalidateTimer()
     let currentVC = pageViewController.viewControllers?.first
     if let index = viewControllers.firstIndex(where: { $0 == currentVC }) {
-      setBarColor(index)
+      swipeViewControllerModel.setBarColor(barStackView: barStackView, currentIndex: index)
+      swipeViewControllerModel.set(currentIndex: index)
     }
   }
 }
 
+//MARK: - TapControllerDataSource
 extension SwipeViewController: TapControllerDataSource {
-  func tapControllerWidthOfView(_ tapController: TapController) -> CGFloat {
-    return view.frame.width
+  
+  func tapControllerNextIndex(_ tapController: TapController) -> Int {
+    let viewWidth = view.frame.width
+    let tapLocationX = swipeViewControllerModel.locationX
+    let currentIndex = swipeViewControllerModel.currentIndex
+    let countOfControllers = viewControllers.count
+    let nextIndex = swipeViewControllerModel.getDirectionAndNextIndex(viewWidth: viewWidth, tapLocationX: tapLocationX, currentIndex: currentIndex, countOfControllers: countOfControllers).index
+    return nextIndex
   }
   
-  func tapControllerGestureLocationX(_ tapController: TapController) -> CGFloat {
-    return swipeViewControllerModel.locationX
+  func tapControllerDirection(_ tapController: TapController) -> TapDirection {
+    let viewWidth = view.frame.width
+    let tapLocationX = swipeViewControllerModel.locationX
+    let currentIndex = swipeViewControllerModel.currentIndex
+    let countOfControllers = viewControllers.count
+    let tapDirextion = swipeViewControllerModel.getDirectionAndNextIndex(viewWidth: viewWidth, tapLocationX: tapLocationX, currentIndex: currentIndex, countOfControllers: countOfControllers).direction
+    return tapDirextion
   }
-  
   
   func tapControllerIndexOfCurrentController(_ tapController: TapController) -> Int {
     return swipeViewControllerModel.currentIndex
@@ -157,25 +194,29 @@ extension SwipeViewController: TapControllerDataSource {
   }
 }
 
+//MARK: - TapControllerDelegate
 extension SwipeViewController: TapControllerDelegate {
+  
   func tapControllerDidTapForward(_ tapController: TapController, nextIndex: Int) {
+    TimerManager.shred.invalidateTimer()
     let currentVC = viewControllers[nextIndex]
     pagingVC.setViewControllers([currentVC], direction: .forward, animated: true) {[weak self] (finished) in
       guard let self = self else {return}
       if finished {
         self.swipeViewControllerModel.set(currentIndex: nextIndex)
-        self.setBarColor(self.swipeViewControllerModel.currentIndex)
+        self.swipeViewControllerModel.setBarColor(barStackView: self.barStackView, currentIndex: self.swipeViewControllerModel.currentIndex)
       }
     }
   }
   
   func tapControllerDidTapBack(_ tapController: TapController, nextIndex: Int) {
+    TimerManager.shred.invalidateTimer()
     let currentVC = viewControllers[nextIndex]
     pagingVC.setViewControllers([currentVC], direction: .reverse , animated: true) {[weak self] (finished) in
       guard let self = self else {return}
       if finished {
         self.swipeViewControllerModel.set(currentIndex: nextIndex)
-        self.setBarColor(self.swipeViewControllerModel.currentIndex)
+        self.swipeViewControllerModel.setBarColor(barStackView: self.barStackView, currentIndex: self.swipeViewControllerModel.currentIndex)
       }
     }
   }
@@ -183,5 +224,38 @@ extension SwipeViewController: TapControllerDelegate {
   func tapControllerDidTap(_ tapController: TapController, gesture: UITapGestureRecognizer) {
     let locationX = gesture.location(in: view).x
     swipeViewControllerModel.set(locationX: locationX)
+  }
+}
+
+//MARK: - TimerManagerDataSource
+extension SwipeViewController: TimerManagerDataSource {
+  
+  func timerManagerTimeInterval(_ timerManager: TimerManager) -> TimeInterval {
+    guard let dataSource = dataSource else {
+      fatalError("🚨 You have to set dataSource for SwipeViewController")
+    }
+    return dataSource.swipeViewControllerTimeIntervalOfAutoScrolling(self)
+  }
+}
+
+//MARK: - TimerManagerDelegate
+extension SwipeViewController: TimerManagerDelegate {
+  
+  func timerManagerFires(_ timerManager: TimerManager, timer: Timer) {
+    let currentIndex = swipeViewControllerModel.currentIndex
+    let countOfControllers = viewControllers.count
+    let nextIndex = swipeViewControllerModel.getForwardNextIndex(currentIndex: currentIndex, countOfControllers: countOfControllers)
+    let currentVC = viewControllers[nextIndex]
+    pagingVC.setViewControllers([currentVC], direction: .forward, animated: true) {[weak self] (finished) in
+      guard let self = self else {return}
+      if finished {
+        self.swipeViewControllerModel.set(currentIndex: nextIndex)
+        self.swipeViewControllerModel.setBarColor(barStackView: self.barStackView, currentIndex: self.swipeViewControllerModel.currentIndex)
+      }
+    }
+  }
+  
+  func timerManagerInvalidate(_ timerManager: TimerManager) {
+    print("Invalidate Timer")
   }
 }
