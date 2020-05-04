@@ -43,6 +43,10 @@ public class SwipeViewController: UIViewController {
     tapController.addTapGesture(in: view)
     makeTimerManager()
   }
+  
+  deinit {
+    TimerManager.shared.invalidateTimer()
+  }
 }
 
 //MARK: - Private function and Lazy Initialization
@@ -99,9 +103,9 @@ extension SwipeViewController {
     }
     
     if dataSource.swipeViewControllerIsAutoScrolling(self) {
-      TimerManager.shred.dataSource = self
-      TimerManager.shred.delegate = self
-      TimerManager.shred.setupTimer()
+      TimerManager.shared.dataSource = self
+      TimerManager.shared.delegate = self
+      TimerManager.shared.setupTimer()
     }
   }
 }
@@ -110,7 +114,7 @@ extension SwipeViewController {
 extension SwipeViewController {
   
   public func invalidatTimer() {
-    TimerManager.shred.invalidateTimer()
+    TimerManager.shared.invalidateTimer()
   }
 }
 
@@ -155,7 +159,7 @@ extension SwipeViewController: UIPageViewControllerDataSource {
 extension SwipeViewController: UIPageViewControllerDelegate {
   
   public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-    TimerManager.shred.invalidateTimer()
+    TimerManager.shared.invalidateTimer()
     let currentVC = pageViewController.viewControllers?.first
     if let index = viewControllers.firstIndex(where: { $0 == currentVC }) {
       swipeViewControllerModel.setBarColor(barStackView: barStackView, currentIndex: index)
@@ -198,7 +202,7 @@ extension SwipeViewController: TapControllerDataSource {
 extension SwipeViewController: TapControllerDelegate {
   
   func tapControllerDidTapForward(_ tapController: TapController, nextIndex: Int) {
-    TimerManager.shred.invalidateTimer()
+    TimerManager.shared.invalidateTimer()
     let currentVC = viewControllers[nextIndex]
     pagingVC.setViewControllers([currentVC], direction: .forward, animated: true) {[weak self] (finished) in
       guard let self = self else {return}
@@ -210,7 +214,7 @@ extension SwipeViewController: TapControllerDelegate {
   }
   
   func tapControllerDidTapBack(_ tapController: TapController, nextIndex: Int) {
-    TimerManager.shred.invalidateTimer()
+    TimerManager.shared.invalidateTimer()
     let currentVC = viewControllers[nextIndex]
     pagingVC.setViewControllers([currentVC], direction: .reverse , animated: true) {[weak self] (finished) in
       guard let self = self else {return}

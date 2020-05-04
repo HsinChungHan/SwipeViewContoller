@@ -17,7 +17,7 @@ protocol TimerManagerDelegate: AnyObject {
 }
 
 class TimerManager {
-  static let shred = TimerManager()
+  static let shared = TimerManager()
   
   weak var dataSource: TimerManagerDataSource?
   weak var delegate: TimerManagerDelegate?
